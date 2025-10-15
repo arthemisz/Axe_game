@@ -119,6 +119,7 @@ static float        gAimPower  = 65.0f;       // Dialed power in aim mode (15..1
 static float        gPower     = 0.0f;        // Dynamic charge power
 static float        gWind      = 0.0f;        // Wind speed (-15..+15)
 static int          gRound     = 0;           // Round index (0..4)
+static float        gDayTime   = 0.0f;        // Smooth time-of-day progression (0=Morning .. 4=Midnight)
 static int          gScore     = 0;           // Total score
 static int          gLastScore = 0;           // Last throw points
 static int          gStreak    = 0;           // Consecutive hits
@@ -240,6 +241,16 @@ static void drawRoundedBox(HDC hdc, int x, int y, int w, int h, int rad, COLORRE
     SelectObject(hdc, oldBr);
     DeleteObject(br);
     if (strokeWidth > 0) DeleteObject(pen);
+}
+
+static COLORREF lerpColor(COLORREF c1, COLORREF c2, float t) {
+    if (t <= 0.0f) return c1;
+    if (t >= 1.0f) return c2;
+    int r1 = GetRValue(c1), g1 = GetGValue(c1), b1 = GetBValue(c1);
+    int r2 = GetRValue(c2), g2 = GetGValue(c2), b2 = GetBValue(c2);
+    return RGB((int)(r1 + (r2 - r1) * t),
+               (int)(g1 + (g2 - g1) * t),
+               (int)(b1 + (b2 - b1) * t));
 }
 
 static void drawCenteredText(HDC hdc, const std::string& str, int cx, int y, HFONT font, COLORREF col) {
@@ -536,25 +547,176 @@ static void newRound() {
 //  Rendering Systems
 // ================================================================
 
-// 1. Sky, Moon, Stars, Distant Forest, Grass
+// 1. Dynamic Day-to-Night Sky, Celestial Bodies, Distant Forest & Grass
+struct SkyPalette {
+    COLORREF topCol;
+    COLORREF midCol;
+    COLORREF botCol;
+    COLORREF groundCol;
+    COLORREF groundEdge;
+    COLORREF pineCol;
+    const char* name;
+    const char* badge;
+};
+
+static const SkyPalette gSkyPalettes[5] = {
+    // 0: Round 1 - Morning (Dawn / Sunrise)
+    {
+        RGB(95, 125, 185),  // Soft morning sky
+        RGB(235, 165, 130), // Peach/rose
+        RGB(255, 215, 135), // Golden sunrise horizon
+        RGB(48, 125, 48),   // Morning dew grass
+        RGB(110, 215, 95),  // Horizon rim
+        RGB(50, 95, 80),    // Misty pine silhouettes
+        "MORNING", "🌅 DAWN"
+    },
+    // 1: Round 2 - Midday (High Noon)
+    {
+        RGB(30, 115, 225),  // Deep azure
+        RGB(85, 175, 245),  // Bright cyan
+        RGB(180, 228, 255), // Cerulean daylight
+        RGB(55, 150, 45),   // Lush sunlit grass
+        RGB(115, 225, 75),  // Vivid lime edge
+        RGB(32, 98, 48),    // Sunlit forest pines
+        "MIDDAY", "☀️ HIGH NOON"
+    },
+    // 2: Round 3 - Sunset (Golden Hour)
+    {
+        RGB(55, 35, 95),    // Royal twilight purple
+        RGB(220, 75, 60),   // Fiery coral
+        RGB(255, 180, 50),  // Molten gold horizon
+        RGB(75, 85, 30),    // Warm sunset turf
+        RGB(220, 150, 45),  // Amber horizon glow
+        RGB(45, 25, 40),    // Sunset dark silhouettes
+        "SUNSET", "🌇 GOLDEN HOUR"
+    },
+    // 3: Round 4 - Twilight (Dusk)
+    {
+        RGB(20, 22, 65),    // Velvety navy
+        RGB(75, 38, 92),    // Dusky purple
+        RGB(140, 68, 100),  // Mauve dusk glow
+        RGB(28, 68, 40),    // Dusk grass
+        RGB(60, 120, 85),   // Twilight green horizon
+        RGB(20, 28, 44),    // Dusk dark pines
+        "TWILIGHT", "🌆 DUSK"
+    },
+    // 4: Round 5 - Dark Night (Midnight)
+    {
+        RGB(6, 8, 22),      // Pitch midnight
+        RGB(14, 20, 48),    // Deep starry indigo
+        RGB(24, 32, 65),    // Night horizon
+        RGB(18, 45, 22),    // Dark nocturnal grass
+        RGB(55, 115, 140),  // Moonlit silver rim
+        RGB(12, 18, 28),    // Moonlit black pines
+        "MIDNIGHT", "🌙 MIDNIGHT"
+    }
+};
+
 static void renderEnvironment(HDC hdc) {
-    // Night Sky gradient
+    int idx0 = (int)floorf(gDayTime);
+    int idx1 = (int)ceilf(gDayTime);
+    if (idx0 < 0) idx0 = 0;
+    if (idx0 > 4) idx0 = 4;
+    if (idx1 < 0) idx1 = 0;
+    if (idx1 > 4) idx1 = 4;
+    float frac = gDayTime - (float)idx0;
+
+    const SkyPalette& p0 = gSkyPalettes[idx0];
+    const SkyPalette& p1 = gSkyPalettes[idx1];
+
+    COLORREF topC    = lerpColor(p0.topCol, p1.topCol, frac);
+    COLORREF midC    = lerpColor(p0.midCol, p1.midCol, frac);
+    COLORREF botC    = lerpColor(p0.botCol, p1.botCol, frac);
+    COLORREF gndC    = lerpColor(p0.groundCol, p1.groundCol, frac);
+    COLORREF gndEdge = lerpColor(p0.groundEdge, p1.groundEdge, frac);
+    COLORREF pineC   = lerpColor(p0.pineCol, p1.pineCol, frac);
+
+    // 1. Sky Gradient (3-stop smooth interpolation)
     for (int y = 0; y < GROUND_Y; ++y) {
-        float t = (float)y / (float)GROUND_Y;
-        int r = (int)(10  + t * 25);
-        int g = (int)(15  + t * 35);
-        int b = (int)(45  + t * 65);
-        drawLine(hdc, 0, y, WIN_W, y, RGB(r, g, b));
+        float normY = (float)y / (float)GROUND_Y;
+        COLORREF col = (normY < 0.5f) ?
+            lerpColor(topC, midC, normY * 2.0f) :
+            lerpColor(midC, botC, (normY - 0.5f) * 2.0f);
+        drawLine(hdc, 0, y, WIN_W, y, col, 1);
     }
 
-    // Moon
-    drawCircle(hdc, 920, 95, 24, RGB(255, 250, 205), RGB(240, 230, 140), 2);
-    drawCircle(hdc, 910, 90, 20, RGB(18, 26, 60), RGB(18, 26, 60), 0); // Crescent cut
+    // 2. Stars for Dusk & Midnight (gDayTime > 2.2)
+    if (gDayTime > 2.2f) {
+        float starAlpha = (gDayTime - 2.2f) / 1.8f;
+        if (starAlpha > 1.0f) starAlpha = 1.0f;
+        srand(1337);
+        for (int i = 0; i < 70; ++i) {
+            int sx = rand() % WIN_W;
+            int sy = 10 + rand() % (GROUND_Y - 80);
+            float twinkle = 0.65f + 0.35f * sinf(gTgtTime * 3.2f + (float)i * 1.7f);
+            int br = (int)(255.0f * starAlpha * twinkle);
+            if (br > 255) br = 255;
+            if (br < 0) br = 0;
+            COLORREF starCol = RGB(br, br, (int)(br * 0.95f + 12));
+            int sz = (i % 7 == 0 && gDayTime > 3.5f) ? 2 : 1;
+            fillSolidRect(hdc, sx, sy, sz, sz, starCol);
+        }
+    }
 
-    // Distant Pine Forest Silhouettes
-    for (int x = 200; x < WIN_W; x += 65) {
-        POINT pts[3] = { { x, GROUND_Y }, { x + 30, GROUND_Y - 95 }, { x + 60, GROUND_Y } };
-        HBRUSH br = CreateSolidBrush(RGB(15, 30, 35));
+    // 3. Dynamic Celestial Bodies & Atmospheric Features
+    if (gDayTime < 0.8f) {
+        // Morning: Sun rising above trees + morning mist
+        int sunX = 850, sunY = GROUND_Y - 90;
+        drawCircle(hdc, sunX, sunY, 55, RGB(255, 235, 160), RGB(255, 220, 130), 0);
+        drawCircle(hdc, sunX, sunY, 40, RGB(255, 248, 200), RGB(255, 235, 150), 1);
+        for (int mx = 60; mx < WIN_W; mx += 260) {
+            fillSolidRect(hdc, mx, GROUND_Y - 35, 180, 8, RGB(245, 215, 195));
+            fillSolidRect(hdc, mx + 40, GROUND_Y - 42, 120, 6, RGB(255, 230, 210));
+        }
+    } else if (gDayTime >= 0.8f && gDayTime < 1.8f) {
+        // Midday: High sun with rays & drifting puffy clouds
+        int sunX = 780, sunY = 100;
+        for (int a = 0; a < 12; ++a) {
+            float ang = (float)a * (3.14159f / 6.0f) + gTgtTime * 0.1f;
+            int rx1 = sunX + (int)(cosf(ang) * 32);
+            int ry1 = sunY + (int)(sinf(ang) * 32);
+            int rx2 = sunX + (int)(cosf(ang) * 48);
+            int ry2 = sunY + (int)(sinf(ang) * 48);
+            drawLine(hdc, rx1, ry1, rx2, ry2, RGB(255, 255, 190), 3);
+        }
+        drawCircle(hdc, sunX, sunY, 28, RGB(255, 255, 235), RGB(255, 235, 140), 2);
+
+        // Fluffy cumulus clouds drifting
+        int clX1 = (int)(220 + fmodf(gTgtTime * 15.0f, (float)(WIN_W + 200))) - 100;
+        drawCircle(hdc, clX1, 110, 24, RGB(252, 254, 255), RGB(252, 254, 255), 0);
+        drawCircle(hdc, clX1 + 28, 100, 32, RGB(252, 254, 255), RGB(252, 254, 255), 0);
+        drawCircle(hdc, clX1 + 58, 110, 22, RGB(252, 254, 255), RGB(252, 254, 255), 0);
+
+        int clX2 = (int)(650 + fmodf(gTgtTime * 10.0f, (float)(WIN_W + 200))) - 100;
+        drawCircle(hdc, clX2, 140, 20, RGB(248, 250, 255), RGB(248, 250, 255), 0);
+        drawCircle(hdc, clX2 + 25, 132, 26, RGB(248, 250, 255), RGB(248, 250, 255), 0);
+        drawCircle(hdc, clX2 + 50, 140, 18, RGB(248, 250, 255), RGB(248, 250, 255), 0);
+    } else if (gDayTime >= 1.8f && gDayTime < 2.8f) {
+        // Sunset: Molten gold sun sinking into the pine horizon + sunset clouds
+        int sunX = 840, sunY = GROUND_Y - 55;
+        drawCircle(hdc, sunX, sunY, 65, RGB(255, 110, 35), RGB(255, 80, 20), 0);
+        drawCircle(hdc, sunX, sunY, 45, RGB(255, 180, 50), RGB(255, 130, 25), 1);
+        fillSolidRect(hdc, 80, 120, 260, 10, RGB(180, 50, 75));
+        fillSolidRect(hdc, 140, 132, 180, 7, RGB(215, 95, 60));
+        fillSolidRect(hdc, 480, 160, 280, 8, RGB(195, 65, 70));
+    } else if (gDayTime >= 2.8f && gDayTime < 3.8f) {
+        // Twilight: Silver crescent moon rising
+        int moonX = 890, moonY = 110;
+        drawCircle(hdc, moonX, moonY, 24, RGB(245, 242, 225), RGB(225, 220, 190), 1);
+        drawCircle(hdc, moonX - 9, moonY - 5, 21, topC, topC, 0);
+    } else {
+        // Midnight: Glowing radiant moon with lunar halo
+        int moonX = 890, moonY = 110;
+        drawCircle(hdc, moonX, moonY, 38, RGB(30, 42, 75), RGB(30, 42, 75), 0);
+        drawCircle(hdc, moonX, moonY, 26, RGB(255, 252, 235), RGB(215, 225, 240), 2);
+        drawCircle(hdc, moonX - 10, moonY - 6, 23, RGB(14, 20, 48), RGB(14, 20, 48), 0);
+    }
+
+    // 4. Distant Pine Forest Silhouettes (Layer 1 - Far ridge)
+    for (int x = 40; x < WIN_W + 50; x += 75) {
+        POINT pts[3] = { { x - 25, GROUND_Y }, { x + 15, GROUND_Y - 70 }, { x + 55, GROUND_Y } };
+        COLORREF farPine = lerpColor(pineC, botC, 0.35f);
+        HBRUSH br = CreateSolidBrush(farPine);
         HPEN pen = (HPEN)GetStockObject(NULL_PEN);
         SelectObject(hdc, br);
         SelectObject(hdc, pen);
@@ -562,10 +724,21 @@ static void renderEnvironment(HDC hdc) {
         DeleteObject(br);
     }
 
-    // Ground & Grass
-    fillSolidRect(hdc, 0, GROUND_Y, WIN_W, WIN_H - GROUND_Y, RGB(34, 100, 34)); // Lush green
-    drawLine(hdc, 0, GROUND_Y, WIN_W, GROUND_Y, RGB(50, 160, 50), 2);            // Horizon highlight
-    fillSolidRect(hdc, 0, GROUND_Y + 30, WIN_W, WIN_H - GROUND_Y - 30, RGB(28, 80, 28)); // Deep earth
+    // 5. Layer 2 Pines (Nearer ridge)
+    for (int x = 0; x < WIN_W + 60; x += 55) {
+        POINT pts[3] = { { x - 15, GROUND_Y }, { x + 20, GROUND_Y - 95 }, { x + 55, GROUND_Y } };
+        HBRUSH br = CreateSolidBrush(pineC);
+        HPEN pen = (HPEN)GetStockObject(NULL_PEN);
+        SelectObject(hdc, br);
+        SelectObject(hdc, pen);
+        Polygon(hdc, pts, 3);
+        DeleteObject(br);
+    }
+
+    // 6. Ground & Grass
+    fillSolidRect(hdc, 0, GROUND_Y, WIN_W, WIN_H - GROUND_Y, gndC);
+    drawLine(hdc, 0, GROUND_Y, WIN_W, GROUND_Y, gndEdge, 2);
+    fillSolidRect(hdc, 0, GROUND_Y + 30, WIN_W, WIN_H - GROUND_Y - 30, RGB((int)(GetRValue(gndC) * 0.7f), (int)(GetGValue(gndC) * 0.7f), (int)(GetBValue(gndC) * 0.7f)));
 
     // Distance Stakes
     int dists[3] = { 450, 650, 850 };
@@ -769,7 +942,7 @@ static void renderLumberjack(HDC hdc, bool followThrough) {
     int headX = torsoX + 2;
 
     // Muscular neck & pointed shirt collar flaps
-    fillSolidRect(hdc, headX - 8, by - 130, 16, 9, RGB(235, 185, 145)); // Neck
+    fillSolidRect(hdc, headX - 8, by - 130, 16, 12, RGB(235, 185, 145)); // Neck
     POINT colL[3] = { { headX - 12, by - 125 }, { headX - 2, by - 121 }, { headX - 10, by - 118 } };
     POINT colR[3] = { { headX + 12, by - 125 }, { headX + 2, by - 121 }, { headX + 10, by - 118 } };
     HBRUSH brCol = CreateSolidBrush(RGB(155, 20, 20));
@@ -778,56 +951,78 @@ static void renderLumberjack(HDC hdc, bool followThrough) {
     Polygon(hdc, colR, 3);
     DeleteObject(brCol);
 
-    // Head base with ear
+    // Head base (skin)
     drawCircle(hdc, headX, by - 138, 16, RGB(242, 195, 155), RGB(180, 125, 85), 1);
-    drawCircle(hdc, headX - 16, by - 138, 4, RGB(235, 185, 145), RGB(170, 115, 75), 1); // Ear with inner fold
-    drawCircle(hdc, headX - 16, by - 138, 2, RGB(200, 145, 105), RGB(170, 115, 75), 0);
 
-    // Focused, Intense Eyes locked on target
-    // Left eye
-    fillSolidRect(hdc, headX - 6, by - 143, 5, 4, RGB(255, 255, 255));
-    fillSolidRect(hdc, headX - 3, by - 143, 3, 4, RGB(45, 30, 20)); // Dark brown iris looking downrange
-    fillSolidRect(hdc, headX - 2, by - 143, 1, 2, RGB(255, 255, 255)); // Catchlight glint
-    // Right eye
-    fillSolidRect(hdc, headX + 4, by - 143, 5, 4, RGB(255, 255, 255));
-    fillSolidRect(hdc, headX + 7, by - 143, 3, 4, RGB(45, 30, 20)); // Looking downrange
-    fillSolidRect(hdc, headX + 8, by - 143, 1, 2, RGB(255, 255, 255)); // Glint
+    // Brown hair framing back of head / nape
+    drawRoundedBox(hdc, headX - 16, by - 146, 7, 18, 3, RGB(110, 52, 18), RGB(75, 32, 10), 1);
 
-    // Furrowed, bushy lumberjack eyebrows angled in concentration
-    drawLine(hdc, headX - 9, by - 147, headX - 1, by - 144, RGB(95, 48, 18), 3);
-    drawLine(hdc, headX + 2, by - 144, headX + 10, by - 147, RGB(95, 48, 18), 3);
+    // Ear with inner fold
+    drawCircle(hdc, headX - 13, by - 137, 4, RGB(235, 185, 145), RGB(170, 115, 75), 1);
+    drawCircle(hdc, headX - 13, by - 137, 2, RGB(200, 145, 105), RGB(170, 115, 75), 0);
 
-    // Weathered Chiseled Nose
-    drawLine(hdc, headX, by - 143, headX + 3, by - 135, RGB(205, 145, 105), 2);
-    drawLine(hdc, headX + 3, by - 135, headX - 1, by - 135, RGB(180, 120, 80), 2);
-
-    // Bushy Multi-Layered Auburn Beard & Mustache
-    drawRoundedBox(hdc, headX - 15, by - 136, 30, 24, 8, RGB(120, 58, 22), RGB(80, 35, 12), 1); // Main beard
-    // Beard hair strands & chiseled chin point
-    drawLine(hdc, headX - 8, by - 128, headX - 5, by - 114, RGB(155, 80, 32), 2);
-    drawLine(hdc, headX - 2, by - 128, headX - 2, by - 112, RGB(160, 85, 35), 2);
-    drawLine(hdc, headX + 4, by - 128, headX + 3, by - 113, RGB(155, 80, 32), 2);
-    drawLine(hdc, headX + 9, by - 128, headX + 7, by - 115, RGB(140, 70, 28), 2);
-    // Distinctive Handlebar Mustache curling over beard
-    drawRoundedBox(hdc, headX - 11, by - 139, 22, 7, 3, RGB(95, 45, 15), RGB(65, 28, 10), 1);
-    drawLine(hdc, headX - 11, by - 136, headX - 14, by - 138, RGB(95, 45, 15), 2); // Mustache left tip
-    drawLine(hdc, headX + 11, by - 136, headX + 14, by - 138, RGB(95, 45, 15), 2); // Mustache right tip
-
-    // Classic Lumberjack Red Winter Beanie (Toque)
-    drawCircle(hdc, headX, by - 150, 16, RGB(195, 25, 25), RGB(130, 15, 15), 1); // Wool crown
-    // Folded ribbed brim of cap
-    drawRoundedBox(hdc, headX - 17, by - 151, 34, 10, 3, RGB(220, 35, 35), RGB(145, 18, 18), 1);
-    for (int rx = headX - 14; rx < headX + 15; rx += 4) {
-        drawLine(hdc, rx, by - 151, rx, by - 142, RGB(160, 20, 20), 1); // Ribbed knit lines
+    // Classic Lumberjack Red Winter Beanie (Toque) - perched high on crown
+    drawRoundedBox(hdc, headX - 14, by - 168, 28, 19, 12, RGB(195, 25, 25), RGB(130, 15, 15), 1);
+    drawRoundedBox(hdc, headX - 16, by - 154, 33, 8, 3, RGB(220, 35, 35), RGB(145, 18, 18), 1);
+    for (int rx = headX - 13; rx < headX + 14; rx += 4) {
+        drawLine(hdc, rx, by - 154, rx, by - 147, RGB(160, 20, 20), 1);
     }
-    // Warm white yarn pom-pom on top
-    drawCircle(hdc, headX, by - 165, 5, RGB(245, 245, 245), RGB(180, 180, 180), 1);
+    drawCircle(hdc, headX, by - 170, 5, RGB(245, 245, 245), RGB(180, 180, 180), 1);
+
+    // Sideburns connecting hat to beard
+    drawLine(hdc, headX - 10, by - 147, headX - 10, by - 136, RGB(120, 58, 22), 3);
+
+    // Bushy Multi-Layered Auburn Beard
+    drawRoundedBox(hdc, headX - 14, by - 135, 28, 22, 7, RGB(120, 58, 22), RGB(80, 35, 12), 1);
+    drawLine(hdc, headX - 8, by - 126, headX - 5, by - 114, RGB(155, 80, 32), 2);
+    drawLine(hdc, headX - 2, by - 126, headX - 2, by - 112, RGB(160, 85, 35), 2);
+    drawLine(hdc, headX + 4, by - 126, headX + 3, by - 113, RGB(155, 80, 32), 2);
+    drawLine(hdc, headX + 8, by - 126, headX + 7, by - 115, RGB(140, 70, 28), 2);
+
+    // Distinctive Handlebar Mustache
+    drawRoundedBox(hdc, headX - 8, by - 137, 22, 6, 2, RGB(95, 45, 15), RGB(65, 28, 10), 1);
+    drawLine(hdc, headX - 8, by - 135, headX - 13, by - 137, RGB(95, 45, 15), 2);
+    drawLine(hdc, headX + 13, by - 135, headX + 17, by - 137, RGB(95, 45, 15), 2);
+
+    // Weathered Lumberjack Nose protruding forward
+    POINT nosePts[3] = { { headX + 12, by - 143 }, { headX + 18, by - 137 }, { headX + 12, by - 137 } };
+    HBRUSH brNose = CreateSolidBrush(RGB(235, 175, 135));
+    SelectObject(hdc, brNose);
+    HPEN penNose = CreatePen(PS_SOLID, 1, RGB(190, 130, 90));
+    SelectObject(hdc, penNose);
+    Polygon(hdc, nosePts, 3);
+    DeleteObject(penNose);
+    DeleteObject(brNose);
+
+    // Focused, Intense Lumberjack Eyes (Locked on target downrange)
+    int eyeY = by - 144;
+    int eyeH = followThrough ? 5 : 4;
+
+    // Left eye (far eye in 3/4 perspective)
+    fillSolidRect(hdc, headX - 1, eyeY, 4, eyeH, RGB(255, 255, 255));
+    fillSolidRect(hdc, headX + 1, eyeY, 2, eyeH, RGB(35, 105, 190));
+    fillSolidRect(hdc, headX + 2, eyeY + 1, 1, eyeH - 1, RGB(10, 10, 15));
+    fillSolidRect(hdc, headX + 1, eyeY, 1, 1, RGB(255, 255, 255));
+    drawLine(hdc, headX - 2, eyeY - 1, headX + 3, eyeY - 1, RGB(35, 25, 20), 1);
+
+    // Right eye (near eye - prominent, sharp, focused!)
+    fillSolidRect(hdc, headX + 5, eyeY, 7, eyeH, RGB(255, 255, 255));
+    fillSolidRect(hdc, headX + 8, eyeY, 4, eyeH, RGB(35, 115, 205));
+    fillSolidRect(hdc, headX + 10, eyeY + 1, 2, eyeH - 1, RGB(10, 10, 15));
+    fillSolidRect(hdc, headX + 8, eyeY, 2, 2, RGB(255, 255, 255));
+    drawLine(hdc, headX + 4, eyeY - 1, headX + 12, eyeY - 1, RGB(30, 20, 15), 1);
+    drawLine(hdc, headX + 5, eyeY + eyeH, headX + 12, eyeY + eyeH, RGB(185, 135, 95), 1);
+
+    // Furrowed Bushy Lumberjack Eyebrows
+    drawLine(hdc, headX - 2, by - 147, headX + 3, by - 146, RGB(95, 48, 18), 2);
+    drawLine(hdc, headX + 4, by - 147, headX + 13, by - 145, RGB(95, 48, 18), 3);
+    drawLine(hdc, headX + 6, by - 148, headX + 12, by - 146, RGB(140, 70, 25), 1);
 
     // Cold breath vapor wisp puffing into the night air
     float breathT = fmodf(gTgtTime * 1.6f, 3.0f);
     if (breathT < 1.4f) {
         float bFrac = breathT / 1.4f;
-        int pfx = headX + 16 + (int)(bFrac * 26.0f);
+        int pfx = headX + 18 + (int)(bFrac * 26.0f);
         int pfy = by - 132 - (int)(bFrac * 12.0f);
         int pfr = 3 + (int)(bFrac * 7.0f);
         drawCircle(hdc, pfx, pfy, pfr, RGB(215, 230, 245), RGB(180, 205, 230), 0);
@@ -1032,10 +1227,15 @@ static void renderHUD(HDC hdc) {
     // Audio status
     drawTextAt(hdc, gSound ? "🔊 SFX: ON [M]" : "🔇 MUTED [M]", 670, 26, hFontNorm, gSound ? RGB(180, 220, 180) : RGB(140, 140, 140));
 
-    // Round
+    // Round with Time of Day Indicator
+    static const char* kDayNames[5] = { "🌅 MORNING", "☀️ MIDDAY", "🌇 SUNSET", "🌆 TWILIGHT", "🌙 MIDNIGHT" };
+    static const COLORREF kDayColors[5] = { RGB(255, 215, 140), RGB(135, 220, 255), RGB(255, 160, 60), RGB(215, 160, 255), RGB(180, 210, 255) };
+    int safeDay = (std::min)((std::max)(gRound, 0), 4);
+
     char rdTxt[32];
     sprintf(rdTxt, "ROUND %d / %d", gRound + 1, ROUNDS);
-    drawTextAt(hdc, rdTxt, WIN_W - 170, 22, hFontLarge, RGB(255, 255, 255));
+    drawTextAt(hdc, rdTxt, WIN_W - 210, 16, hFontBold, RGB(255, 255, 255));
+    drawTextAt(hdc, kDayNames[safeDay], WIN_W - 210, 36, hFontSmall, kDayColors[safeDay]);
 
     // ── BOTTOM CONTROL DECK ──
     drawRoundedBox(hdc, 20, 520, WIN_W - 40, 85, 10, RGB(16, 20, 28), RGB(70, 80, 105), 1);
@@ -1142,9 +1342,10 @@ static void renderTitle(HDC hdc) {
     drawCircle(hdc, WIN_W / 2, 230, 20, RGB(220, 20, 60), RGB(140, 10, 30), 2);
     drawCircle(hdc, WIN_W / 2, 230, 10, RGB(255, 215, 0), RGB(200, 140, 0), 2);
 
-    drawCenteredText(hdc, "TARGET RULES & SCORING", WIN_W / 2, 290, hFontBold, RGB(100, 220, 255));
-    drawCenteredText(hdc, "Gold Bullseye: 100 pts  |  Red Ring: 75 pts  |  White: 50 pts  |  Blue: 25 pts", WIN_W / 2, 320, hFontNorm, RGB(230, 235, 245));
-    drawCenteredText(hdc, "Target MOVES on an overhead rail! Lead your throws ahead of it!", WIN_W / 2, 350, hFontBold, RGB(255, 215, 0));
+    drawCenteredText(hdc, "TARGET RULES & SCORING", WIN_W / 2, 288, hFontBold, RGB(100, 220, 255));
+    drawCenteredText(hdc, "Gold Bullseye: 100 pts  |  Red Ring: 75 pts  |  White: 50 pts  |  Blue: 25 pts", WIN_W / 2, 314, hFontNorm, RGB(230, 235, 245));
+    drawCenteredText(hdc, "Target MOVES on an overhead rail! Lead your throws ahead of it!", WIN_W / 2, 338, hFontBold, RGB(255, 215, 0));
+    drawCenteredText(hdc, "Time of Day: 🌅 Morning  →  ☀️ Midday  →  🌇 Sunset  →  🌆 Twilight  →  🌙 Midnight", WIN_W / 2, 364, hFontSmall, RGB(255, 205, 120));
 
     drawCenteredText(hdc, "CONTROLS & FLIGHT TIME CALIBRATION:", WIN_W / 2, 395, hFontBold, RGB(100, 220, 255));
     drawCenteredText(hdc, "[UP / DOWN] Set Trajectory Path  |  [LEFT / RIGHT] Dial Throw Speed", WIN_W / 2, 420, hFontNorm, RGB(230, 235, 245));
@@ -1172,7 +1373,14 @@ static void renderResult(HDC hdc) {
         drawCenteredText(hdc, strk, WIN_W / 2, 260, hFontBold, RGB(50, 255, 120));
     }
 
-    drawCenteredText(hdc, "Press [ENTER] or [SPACE] for next throw", WIN_W / 2, 305, hFontNorm, RGB(220, 230, 245));
+    if (gRound + 1 < ROUNDS) {
+        static const char* kDayNamesNext[5] = { "Morning", "Midday", "Sunset", "Twilight", "Midnight" };
+        char nxtTxt[64];
+        sprintf(nxtTxt, "Press [ENTER] or [SPACE] for Round %d (%s)", gRound + 2, kDayNamesNext[gRound + 1]);
+        drawCenteredText(hdc, nxtTxt, WIN_W / 2, 305, hFontBold, RGB(255, 215, 0));
+    } else {
+        drawCenteredText(hdc, "Press [ENTER] or [SPACE] for Championship Results", WIN_W / 2, 305, hFontBold, RGB(255, 215, 0));
+    }
 }
 
 static void renderGameOver(HDC hdc) {
@@ -1243,6 +1451,10 @@ static void updateAndRender() {
     updateLeaves();
     updateParticles();
     if (gCalibFlash > 0.0f) gCalibFlash -= DT;
+
+    // Smooth time-of-day progression across levels (Round 1: Morning -> Round 5: Midnight)
+    float targetDay = (float)(std::min)(gRound, ROUNDS - 1);
+    gDayTime += (targetDay - gDayTime) * 2.5f * DT;
 
     // ── Render into Memory DC (Double Buffer) ──
     if (gState == STATE_TITLE) {
@@ -1318,6 +1530,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (wParam == VK_RETURN || wParam == VK_SPACE) {
                 gScore       = 0;
                 gRound       = 0;
+                gDayTime     = 0.0f;
                 gStreak      = 0;
                 gMaxStreak   = 0;
                 gCalibBonus  = 0;
