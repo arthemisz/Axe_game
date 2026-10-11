@@ -391,7 +391,7 @@ static void startThrow(float pow) {
     float rad = gAngle * PI_F / 180.0f;
     float spd = pow * 7.5f + 220.0f;
 
-    gAxeP    = V2(140.0f, 410.0f);
+    gAxeP    = V2(170.0f, 395.0f);
     gAxeV    = V2(cosf(rad) * spd, sinf(rad) * spd);
     gAxeRot  = 0.0f;
     gAxeSpin = 12.0f + pow * 0.12f;
@@ -625,40 +625,238 @@ static void renderTargetSystem(HDC hdc) {
     }
 }
 
-// 3. Lumberjack Character
+// 3. Detailed Lumberjack Character
 static void renderLumberjack(HDC hdc, bool followThrough) {
     int bx = 110, by = GROUND_Y;
 
-    // Boots
-    fillSolidRect(hdc, bx - 14, by - 16, 12, 16, RGB(50, 30, 20));
-    fillSolidRect(hdc, bx + 2,  by - 16, 12, 16, RGB(50, 30, 20));
+    // ── 1. Soft Ground Shadow under boots ──
+    drawCircle(hdc, bx - 6, by + 1, 24, RGB(18, 55, 18), RGB(18, 55, 18), 0);
+    drawCircle(hdc, bx + 12, by + 1, 20, RGB(18, 55, 18), RGB(18, 55, 18), 0);
 
-    // Denim Trousers
-    fillSolidRect(hdc, bx - 12, by - 60, 10, 46, RGB(40, 60, 100));
-    fillSolidRect(hdc, bx + 2,  by - 60, 10, 46, RGB(40, 60, 100));
+    // ── 2. Heavy Leather Logging Boots with Lug Soles & Cross-Laces ──
+    // Left Boot (Front)
+    fillSolidRect(hdc, bx - 19, by - 6, 18, 6, RGB(30, 20, 15)); // Deep tread lug sole
+    for (int t = bx - 18; t < bx - 2; t += 4) {
+        drawLine(hdc, t, by - 6, t, by - 1, RGB(15, 10, 8), 1);   // Tread grip cuts
+    }
+    drawRoundedBox(hdc, bx - 19, by - 24, 18, 19, 4, RGB(85, 48, 26), RGB(50, 25, 15), 1); // Oiled leather upper
+    drawRoundedBox(hdc, bx - 19, by - 14, 11, 9, 3, RGB(105, 60, 32), RGB(50, 25, 15), 1); // Toe cap
+    // Cross-laces & metal eyelets
+    drawLine(hdc, bx - 15, by - 20, bx - 7, by - 16, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx - 7,  by - 20, bx - 15, by - 16, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx - 15, by - 16, bx - 7, by - 12, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx - 7,  by - 16, bx - 15, by - 12, RGB(225, 195, 140), 1);
+    drawCircle(hdc, bx - 16, by - 20, 1, RGB(255, 215, 0), RGB(0, 0, 0), 1);
+    drawCircle(hdc, bx - 6,  by - 20, 1, RGB(255, 215, 0), RGB(0, 0, 0), 1);
 
-    // Torso (Red & Black Plaid Flannel Shirt)
-    fillSolidRect(hdc, bx - 14, by - 110, 28, 52, RGB(180, 20, 20));
-    drawLine(hdc, bx - 6, by - 110, bx - 6, by - 58, RGB(20, 20, 20), 2); // Plaid stripe
-    drawLine(hdc, bx + 6, by - 110, bx + 6, by - 58, RGB(20, 20, 20), 2);
+    // Right Boot (Back)
+    fillSolidRect(hdc, bx + 3, by - 6, 18, 6, RGB(30, 20, 15)); // Deep tread lug sole
+    for (int t = bx + 4; t < bx + 20; t += 4) {
+        drawLine(hdc, t, by - 6, t, by - 1, RGB(15, 10, 8), 1);
+    }
+    drawRoundedBox(hdc, bx + 3, by - 24, 18, 19, 4, RGB(80, 44, 24), RGB(45, 22, 12), 1);
+    drawRoundedBox(hdc, bx + 10, by - 14, 11, 9, 3, RGB(100, 56, 30), RGB(45, 22, 12), 1);
+    // Cross-laces
+    drawLine(hdc, bx + 7,  by - 20, bx + 15, by - 16, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx + 15, by - 20, bx + 7,  by - 16, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx + 7,  by - 16, bx + 15, by - 12, RGB(225, 195, 140), 1);
+    drawLine(hdc, bx + 15, by - 16, bx + 7,  by - 12, RGB(225, 195, 140), 1);
 
-    // Head, Beard & Cap
-    drawCircle(hdc, bx, by - 122, 14, RGB(240, 190, 150), RGB(0, 0, 0), 1); // Face
-    fillSolidRect(hdc, bx - 8, by - 118, 16, 10, RGB(100, 50, 20));          // Beard
-    drawCircle(hdc, bx, by - 130, 12, RGB(190, 20, 20), RGB(0, 0, 0), 1);   // Cap
+    // ── 3. Denim Work Jeans with Rolled Cuffs & Golden Stitching ──
+    // Rolled denim cuffs (lighter underside denim fabric)
+    drawRoundedBox(hdc, bx - 20, by - 28, 20, 6, 2, RGB(90, 115, 155), RGB(50, 70, 105), 1);
+    drawRoundedBox(hdc, bx + 2,  by - 28, 20, 6, 2, RGB(90, 115, 155), RGB(50, 70, 105), 1);
+    drawLine(hdc, bx - 20, by - 28, bx, by - 28, RGB(255, 215, 0), 1); // Gold hem stitch
+    drawLine(hdc, bx + 2,  by - 28, bx + 22, by - 28, RGB(255, 215, 0), 1);
 
-    // Arms & Axe
+    // Denim pant legs (rich indigo with seams)
+    drawRoundedBox(hdc, bx - 19, by - 70, 18, 44, 5, RGB(45, 72, 118), RGB(28, 45, 80), 1); // Left leg
+    drawRoundedBox(hdc, bx + 3,  by - 70, 18, 44, 5, RGB(50, 78, 125), RGB(28, 45, 80), 1); // Right leg
+
+    // Reinforced double-knee work patches
+    drawRoundedBox(hdc, bx - 17, by - 52, 14, 16, 3, RGB(58, 88, 138), RGB(35, 55, 95), 1);
+    drawRoundedBox(hdc, bx + 5,  by - 52, 14, 16, 3, RGB(62, 92, 142), RGB(35, 55, 95), 1);
+    // Gold contrast seam stitching
+    drawLine(hdc, bx - 18, by - 68, bx - 18, by - 28, RGB(220, 180, 50), 1); // Outer seam
+    drawLine(hdc, bx + 20, by - 68, bx + 20, by - 28, RGB(220, 180, 50), 1);
+
+    // ── 4. Leather Tool Belt, Brass Buckle & Side Hatchet Holster ──
+    fillSolidRect(hdc, bx - 21, by - 75, 44, 8, RGB(60, 35, 15)); // Thick saddle leather
+    drawLine(hdc, bx - 21, by - 75, bx + 23, by - 75, RGB(180, 130, 60), 1); // Edge crease
+    drawLine(hdc, bx - 21, by - 68, bx + 23, by - 68, RGB(180, 130, 60), 1);
+
+    // Polished Brass Belt Buckle
+    drawRoundedBox(hdc, bx - 7, by - 77, 14, 12, 2, RGB(255, 215, 0), RGB(180, 140, 0), 2);
+    fillSolidRect(hdc, bx - 2, by - 75, 4, 8, RGB(35, 20, 10)); // Buckle tongue pin
+
+    // Side Hatchet Holster on left hip (Spare throwing axe sheathed)
+    fillSolidRect(hdc, bx - 24, by - 73, 7, 18, RGB(45, 25, 12)); // Leather frog holster
+    drawLine(hdc, bx - 26, by - 70, bx - 19, by - 48, RGB(139, 69, 19), 4); // Ash handle
+    drawCircle(hdc, bx - 25, by - 70, 5, RGB(190, 195, 200), RGB(100, 100, 100), 1); // Forged blade
+
+    // ── 5. Buffalo-Check Plaid Flannel Shirt & Heavy Suspenders ──
+    // Dynamic lean when charging power
+    float windupLean = (gState == STATE_CHARGE) ? (gPower / 100.0f) * 8.0f : 0.0f;
+    int torsoX = bx - (int)windupLean;
+
+    drawRoundedBox(hdc, torsoX - 22, by - 124, 44, 52, 6, RGB(200, 25, 25), RGB(130, 15, 15), 1);
+
+    // Buffalo plaid pattern: woven horizontal & vertical black check blocks
+    for (int py = by - 120; py < by - 74; py += 10) {
+        drawLine(hdc, torsoX - 21, py, torsoX + 21, py, RGB(25, 18, 18), 3); // Black horizontal bands
+        drawLine(hdc, torsoX - 21, py + 5, torsoX + 21, py + 5, RGB(140, 15, 15), 1); // Shadow lines
+    }
+    for (int px = torsoX - 16; px < torsoX + 20; px += 10) {
+        drawLine(hdc, px, by - 123, px, by - 74, RGB(25, 18, 18), 3); // Black vertical bands
+    }
+
+    // Shirt front placket & shiny brass buttons
+    drawLine(hdc, torsoX, by - 122, torsoX, by - 75, RGB(140, 15, 15), 3);
+    drawCircle(hdc, torsoX, by - 114, 2, RGB(255, 215, 0), RGB(60, 40, 0), 1);
+    drawCircle(hdc, torsoX, by - 102, 2, RGB(255, 215, 0), RGB(60, 40, 0), 1);
+    drawCircle(hdc, torsoX, by - 90,  2, RGB(255, 215, 0), RGB(60, 40, 0), 1);
+
+    // Sturdy Black Leather Suspenders over shoulders
+    drawLine(hdc, torsoX - 13, by - 124, torsoX - 13, by - 75, RGB(35, 30, 30), 5);
+    drawLine(hdc, torsoX + 13, by - 124, torsoX + 13, by - 75, RGB(35, 30, 30), 5);
+    // Suspender brass attachment clips at waistband
+    drawRoundedBox(hdc, torsoX - 15, by - 77, 5, 6, 1, RGB(230, 185, 40), RGB(40, 30, 0), 1);
+    drawRoundedBox(hdc, torsoX + 11, by - 77, 5, 6, 1, RGB(230, 185, 40), RGB(40, 30, 0), 1);
+
+    // ── 6. Head, Facial Features, Rugged Beard & Winter Cap ──
+    int headX = torsoX + 2;
+
+    // Muscular neck & pointed shirt collar flaps
+    fillSolidRect(hdc, headX - 8, by - 130, 16, 9, RGB(235, 185, 145)); // Neck
+    POINT colL[3] = { { headX - 12, by - 125 }, { headX - 2, by - 121 }, { headX - 10, by - 118 } };
+    POINT colR[3] = { { headX + 12, by - 125 }, { headX + 2, by - 121 }, { headX + 10, by - 118 } };
+    HBRUSH brCol = CreateSolidBrush(RGB(155, 20, 20));
+    SelectObject(hdc, brCol);
+    Polygon(hdc, colL, 3);
+    Polygon(hdc, colR, 3);
+    DeleteObject(brCol);
+
+    // Head base with ear
+    drawCircle(hdc, headX, by - 138, 16, RGB(242, 195, 155), RGB(180, 125, 85), 1);
+    drawCircle(hdc, headX - 16, by - 138, 4, RGB(235, 185, 145), RGB(170, 115, 75), 1); // Ear with inner fold
+    drawCircle(hdc, headX - 16, by - 138, 2, RGB(200, 145, 105), RGB(170, 115, 75), 0);
+
+    // Focused, Intense Eyes locked on target
+    // Left eye
+    fillSolidRect(hdc, headX - 6, by - 143, 5, 4, RGB(255, 255, 255));
+    fillSolidRect(hdc, headX - 3, by - 143, 3, 4, RGB(45, 30, 20)); // Dark brown iris looking downrange
+    fillSolidRect(hdc, headX - 2, by - 143, 1, 2, RGB(255, 255, 255)); // Catchlight glint
+    // Right eye
+    fillSolidRect(hdc, headX + 4, by - 143, 5, 4, RGB(255, 255, 255));
+    fillSolidRect(hdc, headX + 7, by - 143, 3, 4, RGB(45, 30, 20)); // Looking downrange
+    fillSolidRect(hdc, headX + 8, by - 143, 1, 2, RGB(255, 255, 255)); // Glint
+
+    // Furrowed, bushy lumberjack eyebrows angled in concentration
+    drawLine(hdc, headX - 9, by - 147, headX - 1, by - 144, RGB(95, 48, 18), 3);
+    drawLine(hdc, headX + 2, by - 144, headX + 10, by - 147, RGB(95, 48, 18), 3);
+
+    // Weathered Chiseled Nose
+    drawLine(hdc, headX, by - 143, headX + 3, by - 135, RGB(205, 145, 105), 2);
+    drawLine(hdc, headX + 3, by - 135, headX - 1, by - 135, RGB(180, 120, 80), 2);
+
+    // Bushy Multi-Layered Auburn Beard & Mustache
+    drawRoundedBox(hdc, headX - 15, by - 136, 30, 24, 8, RGB(120, 58, 22), RGB(80, 35, 12), 1); // Main beard
+    // Beard hair strands & chiseled chin point
+    drawLine(hdc, headX - 8, by - 128, headX - 5, by - 114, RGB(155, 80, 32), 2);
+    drawLine(hdc, headX - 2, by - 128, headX - 2, by - 112, RGB(160, 85, 35), 2);
+    drawLine(hdc, headX + 4, by - 128, headX + 3, by - 113, RGB(155, 80, 32), 2);
+    drawLine(hdc, headX + 9, by - 128, headX + 7, by - 115, RGB(140, 70, 28), 2);
+    // Distinctive Handlebar Mustache curling over beard
+    drawRoundedBox(hdc, headX - 11, by - 139, 22, 7, 3, RGB(95, 45, 15), RGB(65, 28, 10), 1);
+    drawLine(hdc, headX - 11, by - 136, headX - 14, by - 138, RGB(95, 45, 15), 2); // Mustache left tip
+    drawLine(hdc, headX + 11, by - 136, headX + 14, by - 138, RGB(95, 45, 15), 2); // Mustache right tip
+
+    // Classic Lumberjack Red Winter Beanie (Toque)
+    drawCircle(hdc, headX, by - 150, 16, RGB(195, 25, 25), RGB(130, 15, 15), 1); // Wool crown
+    // Folded ribbed brim of cap
+    drawRoundedBox(hdc, headX - 17, by - 151, 34, 10, 3, RGB(220, 35, 35), RGB(145, 18, 18), 1);
+    for (int rx = headX - 14; rx < headX + 15; rx += 4) {
+        drawLine(hdc, rx, by - 151, rx, by - 142, RGB(160, 20, 20), 1); // Ribbed knit lines
+    }
+    // Warm white yarn pom-pom on top
+    drawCircle(hdc, headX, by - 165, 5, RGB(245, 245, 245), RGB(180, 180, 180), 1);
+
+    // Cold breath vapor wisp puffing into the night air
+    float breathT = fmodf(gTgtTime * 1.6f, 3.0f);
+    if (breathT < 1.4f) {
+        float bFrac = breathT / 1.4f;
+        int pfx = headX + 16 + (int)(bFrac * 26.0f);
+        int pfy = by - 132 - (int)(bFrac * 12.0f);
+        int pfr = 3 + (int)(bFrac * 7.0f);
+        drawCircle(hdc, pfx, pfy, pfr, RGB(215, 230, 245), RGB(180, 205, 230), 0);
+    }
+
+    // ── 7. Arms, Gloves & Handheld Throwing Axe ──
     if (!followThrough) {
-        // Cocked arm ready to throw
-        drawLine(hdc, bx + 8, by - 100, bx + 28, by - 85, RGB(180, 20, 20), 6);
-        drawLine(hdc, bx + 28, by - 85, bx + 34, by - 105, RGB(240, 190, 150), 5);
-        // Axe in hand
-        drawLine(hdc, bx + 30, by - 100, bx + 48, by - 124, RGB(139, 69, 19), 4);
-        drawCircle(hdc, bx + 48, by - 124, 7, RGB(210, 215, 220), RGB(255, 255, 255), 2);
+        // ── LEFT ARM: Sighting / Pointing at target downrange ──
+        // Shoulder to elbow
+        drawLine(hdc, torsoX + 13, by - 116, torsoX + 32, by - 108, RGB(200, 25, 25), 8);
+        // Rolled flannel sleeve cuff
+        drawCircle(hdc, torsoX + 32, by - 108, 6, RGB(25, 18, 18), RGB(200, 25, 25), 1);
+        // Muscular forearm extended
+        drawLine(hdc, torsoX + 32, by - 108, torsoX + 54, by - 105, RGB(238, 190, 150), 7);
+        // Fingerless leather shooting glove
+        drawRoundedBox(hdc, torsoX + 52, by - 109, 14, 8, 2, RGB(70, 42, 20), RGB(40, 22, 10), 1);
+        // Index finger sighting along the target line!
+        drawLine(hdc, torsoX + 64, by - 105, torsoX + 74, by - 105, RGB(238, 190, 150), 3);
+
+        // ── RIGHT ARM: Cocked back in powerful windup ──
+        float extraWindup = (gState == STATE_CHARGE) ? (gPower / 100.0f) * 16.0f : 0.0f;
+        int rShX = torsoX - 13;
+        int rShY = by - 116;
+        int rElbX = torsoX - 28 - (int)extraWindup;
+        int rElbY = by - 106 + (int)(extraWindup * 0.3f);
+        int rHandX = torsoX - 18 - (int)(extraWindup * 1.3f);
+        int rHandY = by - 136 - (int)(extraWindup * 0.5f);
+
+        // Shoulder to elbow
+        drawLine(hdc, rShX, rShY, rElbX, rElbY, RGB(200, 25, 25), 9);
+        // Rolled flannel cuff
+        drawCircle(hdc, rElbX, rElbY, 6, RGB(25, 18, 18), RGB(200, 25, 25), 1);
+        // Forearm cocked up & back
+        drawLine(hdc, rElbX, rElbY, rHandX, rHandY, RGB(238, 190, 150), 7);
+        // Leather glove gripping axe handle
+        drawCircle(hdc, rHandX, rHandY, 7, RGB(70, 42, 20), RGB(40, 22, 10), 1);
+
+        // ── IN-HAND THROWING AXE (Ashwood shaft & double-bitted steel head) ──
+        int axH1_x = rHandX - 10;
+        int axH1_y = rHandY + 24;
+        int axH2_x = rHandX + 18;
+        int axH2_y = rHandY - 34;
+
+        // Ash handle with dark grip swell
+        drawLine(hdc, axH1_x, axH1_y, axH2_x, axH2_y, RGB(139, 69, 19), 5);
+        drawLine(hdc, axH1_x - 2, axH1_y + 2, axH1_x + 4, axH1_y - 8, RGB(45, 22, 10), 5); // Grip swell
+
+        // Double-bitted forged steel head
+        int headX2 = axH2_x;
+        int headY2 = axH2_y;
+        drawLine(hdc, headX2 - 14, headY2 - 8, headX2 + 14, headY2 + 8, RGB(220, 225, 230), 8);
+        // Razor-sharp blade cutting bevels
+        drawCircle(hdc, headX2 - 14, headY2 - 8, 4, RGB(255, 255, 255), RGB(180, 185, 190), 1);
+        drawCircle(hdc, headX2 + 14, headY2 + 8, 4, RGB(255, 255, 255), RGB(180, 185, 190), 1);
+
     } else {
-        // Extended follow-through arm
-        drawLine(hdc, bx + 8, by - 100, bx + 36, by - 95, RGB(180, 20, 20), 6);
-        drawLine(hdc, bx + 36, by - 95, bx + 52, by - 95, RGB(240, 190, 150), 5);
+        // ── FOLLOW-THROUGH POSE (Full explosive release!) ──
+        // Left arm swung back for aerodynamic counter-balance
+        drawLine(hdc, torsoX - 12, by - 114, torsoX - 34, by - 98, RGB(200, 25, 25), 7);
+        drawLine(hdc, torsoX - 34, by - 98, torsoX - 50, by - 86, RGB(238, 190, 150), 6);
+        drawCircle(hdc, torsoX - 50, by - 86, 6, RGB(70, 42, 20), RGB(40, 22, 10), 1);
+
+        // Right arm fully whipped forward toward the target!
+        drawLine(hdc, torsoX + 13, by - 116, torsoX + 46, by - 108, RGB(200, 25, 25), 9);
+        // Rolled cuff
+        drawCircle(hdc, torsoX + 46, by - 108, 6, RGB(25, 18, 18), RGB(200, 25, 25), 1);
+        // Forearm extended whip-cracking
+        drawLine(hdc, torsoX + 46, by - 108, torsoX + 75, by - 100, RGB(238, 190, 150), 7);
+        // Open throwing glove right after releasing axe
+        drawRoundedBox(hdc, torsoX + 73, by - 104, 12, 8, 2, RGB(70, 42, 20), RGB(40, 22, 10), 1);
+        drawLine(hdc, torsoX + 83, by - 100, torsoX + 90, by - 100, RGB(238, 190, 150), 3); // Extended fingers
     }
 }
 
@@ -708,8 +906,8 @@ static void renderTrajectory(HDC hdc) {
 
     float simVX = cosf(rad) * spd;
     float simVY = sinf(rad) * spd;
-    float simX  = 140.0f;
-    float simY  = 410.0f;
+    float simX  = 170.0f;
+    float simY  = 395.0f;
 
     bool  lockedOn = false;
     float lockX = 0, lockY = 0;
