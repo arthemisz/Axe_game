@@ -33,6 +33,7 @@ static const int   WIN_H      = 620;         // Client area height
 static const float PI_F       = 3.14159265f;
 static const float GRAV       = 480.0f;      // Gravity in pixels/sec^2
 static const float DT         = 1.0f / 60.0f;// 60 FPS physics tick
+static const float V_REF      = 650.0f;      // Fixed reference trajectory velocity (pixels/sec)
 static const int   ROUNDS     = 5;           // Match rounds
 static const int   GROUND_Y   = 490;         // Ground horizon line
 
@@ -95,6 +96,15 @@ enum Pattern {
     PAT_HYPER           // Round 5: Extreme agility evasive drone
 };
 
+enum CalibRating {
+    CALIB_NONE,
+    CALIB_PERFECT,
+    CALIB_GREAT,
+    CALIB_GOOD,
+    CALIB_UNDER,
+    CALIB_OVER
+};
+
 // ================================================================
 //  Global Game Variables
 // ================================================================
@@ -116,6 +126,16 @@ static int          gMaxStreak = 0;           // Best streak in match
 static float        gTimer     = 0.0f;        // State timer
 static bool         gSound     = true;        // Audio toggle
 
+// Interactive Speed & Flight-Time Calibration Telemetry
+static float        gSpeedMult   = 1.0f;       // Speed multiplier scaling travel time
+static float        gFlightTime  = 0.0f;       // Active flight elapsed time
+static float        gCalibPower  = 65.0f;      // Last calibrated throw power
+static float        gCalibSpeed  = 707.5f;     // Last calibrated axe speed (px/s)
+static int          gCalibBonus  = 0;          // Calibration timing score bonus
+static CalibRating  gCalibRating = CALIB_NONE; // Rating: Perfect, Great, Good, Under, Over
+static std::string  gCalibMsg    = "";         // Telemetry readout text
+static float        gCalibFlash  = 0.0f;       // Visual flash timer
+
 // Target dynamics
 static float        gTgtX      = 760.0f;
 static float        gTgtY      = 240.0f;
@@ -125,6 +145,17 @@ static float        gTgtSpd    = 90.0f;
 static float        gTgtTime   = 0.0f;
 static Pattern      gPattern   = PAT_VERTICAL;
 static const char*  gPatName   = "";
+
+// Calculate estimated flight duration to target based on speed
+static float calcFlightTime(float pow) {
+    float rad = gAngle * PI_F / 180.0f;
+    float baseVx = cosf(rad) * V_REF;
+    if (baseVx <= 1.0f) baseVx = 1.0f;
+    float distX = (std::max)(gTgtX - 170.0f, 50.0f);
+    float spd = pow * 7.5f + 220.0f;
+    float mult = spd / V_REF;
+    return (distX / baseVx) / mult;
+}
 
 // Axe physical flight
 static V2           gAxeP, gAxeV;
@@ -391,8 +422,14 @@ static void startThrow(float pow) {
     float rad = gAngle * PI_F / 180.0f;
     float spd = pow * 7.5f + 220.0f;
 
+    gCalibPower = pow;
+    gCalibSpeed = spd;
+    gSpeedMult  = spd / V_REF;
+    gFlightTime = 0.0f;
+
+    // Fixed reference velocity ensures the physical trajectory path is constant
     gAxeP    = V2(170.0f, 395.0f);
-    gAxeV    = V2(cosf(rad) * spd, sinf(rad) * spd);
+    gAxeV    = V2(cosf(rad) * V_REF, sinf(rad) * V_REF);
     gAxeRot  = 0.0f;
     gAxeSpin = 12.0f + pow * 0.12f;
     gAxeActive = true;
@@ -405,11 +442,15 @@ static void startThrow(float pow) {
 static void updateAxe() {
     if (!gAxeActive) return;
 
-    gAxeP.x += gAxeV.x * DT;
-    gAxeP.y += gAxeV.y * DT;
-    gAxeV.y += GRAV * DT;
-    gAxeV.x += gWind * 6.0f * DT;
-    gAxeRot += gAxeSpin * DT;
+    gFlightTime += DT;
+
+    // Physical travel scales with gSpeedMult: exact same trajectory path, reduced travel time!
+    float effDT = DT * gSpeedMult;
+    gAxeP.x += gAxeV.x * effDT;
+    gAxeP.y += gAxeV.y * effDT;
+    gAxeV.y += GRAV * effDT;
+    gAxeV.x += gWind * 6.0f * effDT;
+    gAxeRot += gAxeSpin * effDT;
 
     // Flight trail
     gTrail.push_back({ gAxeP.x, gAxeP.y, 0.4f });
@@ -478,13 +519,14 @@ static void updateAxe() {
 }
 
 static void newRound() {
-    gWind     = -8.0f + ((float)rand() / (float)RAND_MAX) * 16.0f; // -8 .. +8
-    gAngle    = -22.0f;
-    gPower    = 0.0f;
-    gAxeActive= false;
+    gWind       = -8.0f + ((float)rand() / (float)RAND_MAX) * 16.0f; // -8 .. +8
+    gAngle      = -22.0f;
+    gPower      = 0.0f;
+    gAxeActive  = false;
     gResultMsg.clear();
-    gLastScore= 0;
+    gLastScore  = 0;
     gTrail.clear();
+    gFlightTime = 0.0f;
 
     initTargetRound();
     gState = STATE_AIM;
@@ -901,11 +943,8 @@ static void renderAxe(HDC hdc) {
 // 5. Full Trajectory Arc with Live Target-Lock Intercept Crosshair
 static void renderTrajectory(HDC hdc) {
     float rad = gAngle * PI_F / 180.0f;
-    float pow = (gState == STATE_CHARGE) ? gPower : gAimPower;
-    float spd = pow * 7.5f + 220.0f;
-
-    float simVX = cosf(rad) * spd;
-    float simVY = sinf(rad) * spd;
+    float simVX = cosf(rad) * V_REF;
+    float simVY = sinf(rad) * V_REF;
     float simX  = 170.0f;
     float simY  = 395.0f;
 
@@ -915,7 +954,7 @@ static void renderTrajectory(HDC hdc) {
     std::vector<POINT> arcPoints;
     arcPoints.push_back({ (int)simX, (int)simY });
 
-    for (int step = 0; step < 110; ++step) {
+    for (int step = 0; step < 115; ++step) {
         simX  += simVX * 0.025f;
         simY  += simVY * 0.025f;
         simVY += GRAV * 0.025f;
@@ -939,7 +978,7 @@ static void renderTrajectory(HDC hdc) {
         }
     }
 
-    // Draw the continuous trajectory arc
+    // Draw the continuous trajectory arc - completely fixed and independent of space/power!
     COLORREF arcCol = lockedOn ? RGB(50, 255, 120) : RGB(255, 215, 80);
     HPEN pen = CreatePen(PS_DOT, 2, arcCol);
     HPEN oldPen = (HPEN)SelectObject(hdc, pen);
@@ -1001,35 +1040,91 @@ static void renderHUD(HDC hdc) {
     // ── BOTTOM CONTROL DECK ──
     drawRoundedBox(hdc, 20, 520, WIN_W - 40, 85, 10, RGB(16, 20, 28), RGB(70, 80, 105), 1);
 
-    // Angle Readout
+    // 1. Angle Readout (Left Column)
     char angTxt[32];
     sprintf(angTxt, "ANGLE: %.0f°", -gAngle);
-    drawTextAt(hdc, angTxt, 40, 535, hFontBold, RGB(100, 220, 255));
-    drawTextAt(hdc, "[↑/↓] Adjust", 40, 560, hFontSmall, RGB(160, 175, 195));
+    drawTextAt(hdc, angTxt, 38, 533, hFontBold, RGB(100, 220, 255));
+    drawTextAt(hdc, "[↑/↓] Pitch Aim", 38, 556, hFontSmall, RGB(160, 175, 195));
+    drawTextAt(hdc, "Trajectory: Live", 38, 576, hFontSmall, RGB(120, 140, 165));
 
-    // Power Gauge Slider
+    // 2. Interactive Speed & Flight-Time Deck (Middle Column)
     float curPow = (gState == STATE_CHARGE) ? gPower : gAimPower;
-    char powTxt[32];
-    sprintf(powTxt, "POWER: %.0f%%", curPow);
-    drawTextAt(hdc, powTxt, 180, 535, hFontBold, (curPow >= 95.0f) ? RGB(255, 70, 70) : RGB(255, 215, 0));
+    float curSpd = curPow * 7.5f + 220.0f;
+    float estFlightTime = calcFlightTime(curPow);
 
-    // Gauge bar
-    drawRoundedBox(hdc, 180, 560, 240, 16, 4, RGB(30, 35, 45), RGB(90, 100, 120), 1);
-    int fillW = (int)((curPow / 100.0f) * 236.0f);
-    COLORREF barCol = (curPow < 50.0f) ? RGB(50, 200, 80) : (curPow < 80.0f) ? RGB(255, 215, 0) : RGB(255, 60, 60);
-    if (fillW > 0) fillSolidRect(hdc, 182, 562, fillW, 12, barCol);
-    drawTextAt(hdc, "[←/→] Dial  [SPACE] Charge", 180, 582, hFontSmall, RGB(160, 175, 195));
+    // Header readout: Power %, Axe Speed & Flight Time to Target
+    char powTxt[80];
+    if (gState == STATE_CHARGE) {
+        sprintf(powTxt, "⚡ CHARGING SPEED: %.0f px/s  |  FLIGHT TIME: %.2fs ⚡", curSpd, estFlightTime);
+        drawTextAt(hdc, powTxt, 165, 527, hFontBold, RGB(255, 215, 0));
+    } else if (gState == STATE_FLY) {
+        sprintf(powTxt, "🚀 IN FLIGHT: %.0f px/s (%.1f m/s)  |  ELAPSED: %.2fs", gCalibSpeed, gCalibSpeed * 0.05f, gFlightTime);
+        drawTextAt(hdc, powTxt, 165, 527, hFontBold, RGB(100, 220, 255));
+    } else {
+        sprintf(powTxt, "SPEED: %.0f px/s (%.0f%%)  |  FLIGHT TIME TO TARGET: %.2fs", curSpd, curPow, estFlightTime);
+        drawTextAt(hdc, powTxt, 165, 527, hFontBold, RGB(255, 215, 0));
+    }
 
-    // Target Telemetry Info
+    // Gauge frame (w = 380, h = 20)
+    int gX = 165, gY = 549, gW = 380, gH = 20;
+    drawRoundedBox(hdc, gX, gY, gW, gH, 4, RGB(22, 26, 36), RGB(70, 85, 115), 1);
+
+    // Active inner track bounds
+    int trackX = gX + 3;
+    int trackW = gW - 6;
+
+    // Fill bar up to curPow
+    float normCur = (curPow - 15.0f) / 85.0f;
+    if (normCur < 0.0f) normCur = 0.0f;
+    if (normCur > 1.0f) normCur = 1.0f;
+    int fillW = (int)(normCur * (float)trackW);
+
+    COLORREF barCol = (curPow < 45.0f) ? RGB(45, 160, 220) :
+                      (curPow < 75.0f) ? RGB(50, 215, 90)  :
+                      (curPow < 90.0f) ? RGB(255, 205, 40) : RGB(255, 65, 55);
+    if (fillW > 0) fillSolidRect(hdc, trackX, gY + 2, fillW, gH - 4, barCol);
+
+    // Target marker tick at dialed power
+    float normTgt = (gAimPower - 15.0f) / 85.0f;
+    int tgtX = trackX + (int)(normTgt * (float)trackW);
+    drawLine(hdc, tgtX, gY - 3, tgtX, gY + gH + 3, RGB(100, 220, 255), 1);
+
+    // Calibration Needle
+    int nX = trackX + fillW;
+    COLORREF nCol = (gState == STATE_CHARGE) ? RGB(255, 235, 80) : RGB(255, 255, 255);
+
+    drawLine(hdc, nX - 1, gY - 3, nX - 1, gY + gH + 3, RGB(20, 20, 20), 1);
+    drawLine(hdc, nX,     gY - 3, nX,     gY + gH + 3, nCol, 3);
+    drawLine(hdc, nX,     gY - 2, nX,     gY + gH + 2, RGB(255, 255, 255), 1);
+    drawLine(hdc, nX + 1, gY - 3, nX + 1, gY + gH + 3, RGB(20, 20, 20), 1);
+
+    // Triangle pointers at needle tips
+    POINT triTop[3] = { { nX - 4, gY - 5 }, { nX + 4, gY - 5 }, { nX, gY } };
+    POINT triBot[3] = { { nX - 4, gY + gH + 5 }, { nX + 4, gY + gH + 5 }, { nX, gY + gH } };
+    HBRUSH brN = CreateSolidBrush(nCol);
+    HBRUSH oldBrN = (HBRUSH)SelectObject(hdc, brN);
+    Polygon(hdc, triTop, 3);
+    Polygon(hdc, triBot, 3);
+    SelectObject(hdc, oldBrN);
+    DeleteObject(brN);
+
+    // Gauge bottom instructions / live advice
+    if (gState == STATE_CHARGE) {
+        drawTextAt(hdc, ">>> RELEASE [SPACE] TO THROW! (TIME REDUCES AS YOU CHARGE) <<<", 165, 578, hFontSmall, RGB(255, 215, 0));
+    } else if (gState == STATE_FLY) {
+        drawTextAt(hdc, "Axe in flight! Fixed trajectory path at calibrated speed.", 165, 578, hFontSmall, RGB(100, 220, 255));
+    } else {
+        drawTextAt(hdc, "[SPACE Hold & Rel] Charge Speed to Reduce Time  |  [←/→] Dial Speed", 165, 578, hFontSmall, RGB(160, 185, 210));
+    }
+
+    // 3. Target Telemetry & Telemetry Deck (Right Column)
     char telTxt[64];
-    sprintf(telTxt, "TARGET: %s", gPatName);
-    drawTextAt(hdc, telTxt, 460, 535, hFontBold, RGB(255, 160, 255));
-    char rngTxt[64];
-    sprintf(rngTxt, "RANGE: %.0fm   SPEED: %.0f px/s", (gTgtX - 110.0f) * 0.05f, fabsf(gTgtVX) + fabsf(gTgtVY));
-    drawTextAt(hdc, rngTxt, 460, 560, hFontNorm, RGB(200, 210, 225));
+    sprintf(telTxt, "TARGET: %s  |  RANGE: %.0fm  |  SPEED: %.0f px/s", gPatName, (gTgtX - 110.0f) * 0.05f, fabsf(gTgtVX) + fabsf(gTgtVY));
+    drawTextAt(hdc, telTxt, 570, 527, hFontBold, RGB(255, 160, 255));
 
-    // Controls Help Summary
-    drawTextAt(hdc, "[SPACE / ENTER] Hurl Axe   |   [M] Toggle Audio   |   [ESC] Exit", 460, 582, hFontSmall, RGB(255, 215, 0));
+    drawTextAt(hdc, "[AIM ANGLE FOR PATH  •  HOLD SPACE TO REDUCE TIME]", 570, 551, hFontNorm, RGB(175, 195, 220));
+
+    drawTextAt(hdc, "[SPACE] Charge & Reduce Time  |  [ENTER] Quick Throw  |  [M] SFX  |  [ESC] Exit", 570, 578, hFontSmall, RGB(255, 215, 0));
 }
 
 // 7. Overlays: Title, Result, Game Over
@@ -1051,9 +1146,9 @@ static void renderTitle(HDC hdc) {
     drawCenteredText(hdc, "Gold Bullseye: 100 pts  |  Red Ring: 75 pts  |  White: 50 pts  |  Blue: 25 pts", WIN_W / 2, 320, hFontNorm, RGB(230, 235, 245));
     drawCenteredText(hdc, "Target MOVES on an overhead rail! Lead your throws ahead of it!", WIN_W / 2, 350, hFontBold, RGB(255, 215, 0));
 
-    drawCenteredText(hdc, "CONTROLS:", WIN_W / 2, 395, hFontBold, RGB(100, 220, 255));
-    drawCenteredText(hdc, "[UP / DOWN] Throw Angle  |  [LEFT / RIGHT] Throw Power (Live Arc!)", WIN_W / 2, 420, hFontNorm, RGB(230, 235, 245));
-    drawCenteredText(hdc, "[SPACE Hold & Rel] Charge & Hurl  |  [ENTER] Quick Throw", WIN_W / 2, 445, hFontNorm, RGB(230, 235, 245));
+    drawCenteredText(hdc, "CONTROLS & FLIGHT TIME CALIBRATION:", WIN_W / 2, 395, hFontBold, RGB(100, 220, 255));
+    drawCenteredText(hdc, "[UP / DOWN] Set Trajectory Path  |  [LEFT / RIGHT] Dial Throw Speed", WIN_W / 2, 420, hFontNorm, RGB(230, 235, 245));
+    drawCenteredText(hdc, "[SPACE Hold & Rel] Charge Speed to Reduce Flight Time!  |  [ENTER] Quick Throw", WIN_W / 2, 445, hFontNorm, RGB(230, 235, 245));
 
     if ((clock() / 450) % 2 == 0) {
         drawCenteredText(hdc, ">>> PRESS [ENTER] OR [SPACE] TO START <<<", WIN_W / 2, 495, hFontLarge, RGB(255, 215, 0));
@@ -1061,16 +1156,23 @@ static void renderTitle(HDC hdc) {
 }
 
 static void renderResult(HDC hdc) {
-    drawRoundedBox(hdc, WIN_W / 2 - 250, 180, 500, 160, 12, RGB(16, 20, 30), RGB(255, 215, 0), 2);
-    drawCenteredText(hdc, gResultMsg, WIN_W / 2, 210, hFontLarge, RGB(255, 215, 0));
+    drawRoundedBox(hdc, WIN_W / 2 - 250, 160, 500, 195, 12, RGB(16, 20, 30), RGB(255, 215, 0), 2);
+    drawCenteredText(hdc, gResultMsg, WIN_W / 2, 185, hFontLarge, RGB(255, 215, 0));
+
+    // Display calibrated throw speed and actual flight time
+    if (gCalibSpeed > 0.0f) {
+        char calTxt[80];
+        sprintf(calTxt, "Axe Throw Speed: %.0f px/s (%.1f m/s)  |  Flight Time: %.2fs", gCalibSpeed, gCalibSpeed * 0.05f, gFlightTime);
+        drawCenteredText(hdc, calTxt, WIN_W / 2, 225, hFontBold, RGB(100, 220, 255));
+    }
 
     if (gStreak > 1) {
         char strk[48];
         sprintf(strk, "Consecutive Streak: x%d (+%d BONUS PTS)", gStreak, (gStreak - 1) * 25);
-        drawCenteredText(hdc, strk, WIN_W / 2, 255, hFontBold, RGB(50, 255, 120));
+        drawCenteredText(hdc, strk, WIN_W / 2, 260, hFontBold, RGB(50, 255, 120));
     }
 
-    drawCenteredText(hdc, "Press [ENTER] or [SPACE] for next throw", WIN_W / 2, 295, hFontNorm, RGB(220, 230, 245));
+    drawCenteredText(hdc, "Press [ENTER] or [SPACE] for next throw", WIN_W / 2, 305, hFontNorm, RGB(220, 230, 245));
 }
 
 static void renderGameOver(HDC hdc) {
@@ -1119,7 +1221,8 @@ static void updateAndRender() {
 
     case STATE_CHARGE:
         updateTarget();
-        gPower = (std::min)(gPower + 105.0f * DT, 100.0f);
+        // Holding SPACE charges power & speed, directly reducing flight time!
+        gPower = (std::min)(gPower + 85.0f * DT, 100.0f);
         break;
 
     case STATE_FLY:
@@ -1139,6 +1242,7 @@ static void updateAndRender() {
 
     updateLeaves();
     updateParticles();
+    if (gCalibFlash > 0.0f) gCalibFlash -= DT;
 
     // ── Render into Memory DC (Double Buffer) ──
     if (gState == STATE_TITLE) {
@@ -1212,10 +1316,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
         if (gState == STATE_TITLE) {
             if (wParam == VK_RETURN || wParam == VK_SPACE) {
-                gScore     = 0;
-                gRound     = 0;
-                gStreak    = 0;
-                gMaxStreak = 0;
+                gScore       = 0;
+                gRound       = 0;
+                gStreak      = 0;
+                gMaxStreak   = 0;
+                gCalibBonus  = 0;
+                gCalibRating = CALIB_NONE;
+                gCalibMsg.clear();
                 gStuckAxes.clear();
                 gParticles.clear();
                 newRound();
@@ -1230,10 +1337,20 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (wParam == VK_RIGHT) gAimPower = (std::min)(gAimPower + 3.0f, 100.0f);
 
             if (wParam == VK_SPACE) {
+                // Hold SPACE to charge speed and reduce flight time!
                 gPower = gAimPower;
                 gState = STATE_CHARGE;
+                playSound(500, 30);
             } else if (wParam == VK_RETURN) {
                 startThrow(gAimPower);
+            }
+            return 0;
+        }
+
+        if (gState == STATE_CHARGE) {
+            if (wParam == VK_BACK || wParam == VK_ESCAPE) {
+                gState = STATE_AIM;
+                gPower = gAimPower;
             }
             return 0;
         }
